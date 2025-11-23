@@ -16,53 +16,52 @@ class QuickBooksParser(ParserStrategy):
         except json.JSONDecodeError:
             raise ValueError("Invalid JSON file")
 
-        # --- SMART HEURISTIC LOGIC (The Fix) ---
-        items = []
-        if isinstance(raw_json, list):
-            items = raw_json
-        elif isinstance(raw_json, dict):
-            # 1. Look for any key that holds a list
-            found_list = False
-            for key, value in raw_json.items():
-                if isinstance(value, list) and len(value) > 0:
-                    items = value
-                    found_list = True
-                    break
-            
-            # 2. If no list found, maybe the dict itself is the record?
-            if not found_list:
-                items = [raw_json]
+        # --- RECURSIVE DEEP SEARCH ---
+        # Finds the first list of dictionaries anywhere in the JSON tree
+        def find_list(data):
+            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                return data
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    result = find_list(value)
+                    if result: return result
+            return []
+
+        items = find_list(raw_json)
+        
+        # Fallback if absolutely nothing found, try to treat root as 1 item
+        if not items and isinstance(raw_json, dict):
+            items = [raw_json]
 
         results = []
         for i in items:
-            if not isinstance(i, dict): continue 
+            # Normalize keys
+            i_low = {k.lower(): v for k, v in i.items() if isinstance(v, (str, int, float, bool))}
             
-            # Normalize keys to lowercase (e.g. "Amount" -> "amount")
-            i_low = {k.lower(): v for k, v in i.items()}
-            
-            # Extract fields with multiple fallback names
+            # Skip empty/wrapper objects
+            if not i_low: continue
+
+            # Amount Logic
             amt = float(i_low.get("amount", i_low.get("value", 0)))
             r_type = i_low.get("type", "Unknown")
+            category = i_low.get("category", i_low.get("account", "Uncategorized"))
             
-            # Flip sign for expenses if they are positive
+            # Flip sign for expenses
             if "expense" in r_type.lower() and amt > 0:
                 amt = -amt
 
-            # Date parsing (try multiple formats)
+            # Date Parsing
             date_str = i_low.get("date", i_low.get("timestamp", "2024-01-01"))
             try:
                 dt = datetime.strptime(date_str, "%Y-%m-%d").date()
             except:
-                try:
-                    dt = datetime.strptime(date_str, "%d-%m-%Y").date()
-                except:
-                    dt = datetime.now().date() # Fallback today
+                dt = datetime.now().date()
 
             results.append(TransactionDTO(
                 date=dt,
                 description=i_low.get("description", i_low.get("memo", "Unknown")),
                 amount=amt,
-                category=i_low.get("category", i_low.get("account", "Uncategorized")),
+                category=category,
                 type=r_type,
                 raw_data=json.dumps(i)
             ))
