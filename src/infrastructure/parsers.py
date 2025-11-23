@@ -17,34 +17,49 @@ class QuickBooksParser(ParserStrategy):
             raise ValueError("Invalid JSON file")
 
         # --- RECURSIVE DEEP SEARCH ---
-        # Finds the first list of dictionaries anywhere in the JSON tree
-        def find_list(data):
-            if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-                return data
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    result = find_list(value)
-                    if result: return result
-            return []
-
-        items = find_list(raw_json)
+        # This function hunts for the largest list of objects in the file
+        # ignoring metadata wrappers like "Header" or "Meta"
+        candidates = []
         
-        # Fallback if absolutely nothing found, try to treat root as 1 item
+        def find_lists(data):
+            if isinstance(data, list):
+                # If we found a list of dicts, it's a candidate
+                if len(data) > 0 and isinstance(data[0], dict):
+                    candidates.append(data)
+                for item in data:
+                    if isinstance(item, (dict, list)):
+                        find_lists(item)
+            elif isinstance(data, dict):
+                for key, value in data.items():
+                    find_lists(value)
+
+        find_lists(raw_json)
+        
+        # Pick the longest list found (most likely the transactions)
+        items = max(candidates, key=len) if candidates else []
+        
+        # Fallback: if no list found, maybe the root dict is the item
         if not items and isinstance(raw_json, dict):
             items = [raw_json]
 
         results = []
         for i in items:
-            # Normalize keys
-            i_low = {k.lower(): v for k, v in i.items() if isinstance(v, (str, int, float, bool))}
+            if not isinstance(i, dict): continue
             
-            # Skip empty/wrapper objects
+            # Normalize keys
+            i_low = {k.lower(): v for k, v in i.items() if isinstance(v, (str, int, float))}
+            
+            # Validation: Must have at least an amount or description to be valid
             if not i_low: continue
 
-            # Amount Logic
-            amt = float(i_low.get("amount", i_low.get("value", 0)))
+            # Robust Float Conversion
+            try:
+                val_str = i_low.get("amount", i_low.get("value", 0))
+                amt = float(val_str)
+            except (ValueError, TypeError):
+                continue # Skip metadata rows (like "GAAP")
+
             r_type = i_low.get("type", "Unknown")
-            category = i_low.get("category", i_low.get("account", "Uncategorized"))
             
             # Flip sign for expenses
             if "expense" in r_type.lower() and amt > 0:
@@ -61,18 +76,16 @@ class QuickBooksParser(ParserStrategy):
                 date=dt,
                 description=i_low.get("description", i_low.get("memo", "Unknown")),
                 amount=amt,
-                category=category,
+                category=i_low.get("category", i_low.get("account", "Uncategorized")),
                 type=r_type,
                 raw_data=json.dumps(i)
             ))
         return results
 
 class RootfiParser(QuickBooksParser):
-    # Reuse the smart logic above, it handles both structures now
     pass
 
 class ParserFactory:
     @staticmethod
     def get_parser(source: str) -> ParserStrategy:
-        # Return the smart parser for both
         return QuickBooksParser()
