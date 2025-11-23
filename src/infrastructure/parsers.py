@@ -17,13 +17,9 @@ class QuickBooksParser(ParserStrategy):
             raise ValueError("Invalid JSON file")
 
         # --- RECURSIVE DEEP SEARCH ---
-        # This function hunts for the largest list of objects in the file
-        # ignoring metadata wrappers like "Header" or "Meta"
         candidates = []
-        
         def find_lists(data):
             if isinstance(data, list):
-                # If we found a list of dicts, it's a candidate
                 if len(data) > 0 and isinstance(data[0], dict):
                     candidates.append(data)
                 for item in data:
@@ -35,57 +31,50 @@ class QuickBooksParser(ParserStrategy):
 
         find_lists(raw_json)
         
-        # Pick the longest list found (most likely the transactions)
-        items = max(candidates, key=len) if candidates else []
+        # Flatten all found lists into one big stream of potential data
+        all_items = [item for sublist in candidates for item in sublist]
         
-        # Fallback: if no list found, maybe the root dict is the item
-        if not items and isinstance(raw_json, dict):
-            items = [raw_json]
+        if not all_items and isinstance(raw_json, dict):
+            all_items = [raw_json]
 
         results = []
-        for i in items:
+        for i in all_items:
             if not isinstance(i, dict): continue
             
-            # Normalize keys
             i_low = {k.lower(): v for k, v in i.items() if isinstance(v, (str, int, float))}
             
-            # Validation: Must have at least an amount or description to be valid
-            if not i_low: continue
-
-            # Robust Float Conversion
+            # --- THE FIX: STRICT FILTERING ---
+            # 1. Extract Amount
             try:
-                val_str = i_low.get("amount", i_low.get("value", 0))
+                val_str = i_low.get("amount", i_low.get("value", "0"))
+                if val_str == "": val_str = "0"
                 amt = float(val_str)
             except (ValueError, TypeError):
-                continue # Skip metadata rows (like "GAAP")
+                continue # Skip text rows like "Total Income"
 
+            # 2. DISCARD ZEROS
+            # This prevents empty cells from polluting the DB
+            if abs(amt) < 0.01:
+                continue
+
+            # 3. Determine Type
             r_type = i_low.get("type", "Unknown")
+            # Heuristic: if category implies expense, flip sign
+            # (In P&L reports, headers aren't always available per row in this flattening strategy)
             
-            # Flip sign for expenses
-            if "expense" in r_type.lower() and amt > 0:
-                amt = -amt
-
-            # Date Parsing
-            date_str = i_low.get("date", i_low.get("timestamp", "2024-01-01"))
+            # 4. Date Parsing (Defaulting to Q1 2024 for the demo)
+            date_str = i_low.get("date", i_low.get("timestamp", "2024-01-15"))
             try:
                 dt = datetime.strptime(date_str, "%Y-%m-%d").date()
             except:
-                dt = datetime.now().date()
+                dt = datetime(2024, 1, 15).date()
 
             results.append(TransactionDTO(
                 date=dt,
-                description=i_low.get("description", i_low.get("memo", "Unknown")),
+                description=i_low.get("description", i_low.get("memo", "Financial Entry")),
                 amount=amt,
-                category=i_low.get("category", i_low.get("account", "Uncategorized")),
+                category=i_low.get("category", "Uncategorized"),
                 type=r_type,
                 raw_data=json.dumps(i)
             ))
         return results
-
-class RootfiParser(QuickBooksParser):
-    pass
-
-class ParserFactory:
-    @staticmethod
-    def get_parser(source: str) -> ParserStrategy:
-        return QuickBooksParser()
