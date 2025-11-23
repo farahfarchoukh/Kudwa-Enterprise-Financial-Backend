@@ -41,9 +41,10 @@ class QuickBooksParser(ParserStrategy):
         for i in all_items:
             if not isinstance(i, dict): continue
             
+            # Normalize keys
             i_low = {k.lower(): v for k, v in i.items() if isinstance(v, (str, int, float))}
             
-            # --- THE FIX: STRICT FILTERING ---
+            # --- STRICT FILTERING ---
             # 1. Extract Amount
             try:
                 val_str = i_low.get("amount", i_low.get("value", "0"))
@@ -53,14 +54,11 @@ class QuickBooksParser(ParserStrategy):
                 continue # Skip text rows like "Total Income"
 
             # 2. DISCARD ZEROS
-            # This prevents empty cells from polluting the DB
             if abs(amt) < 0.01:
                 continue
 
             # 3. Determine Type
             r_type = i_low.get("type", "Unknown")
-            # Heuristic: if category implies expense, flip sign
-            # (In P&L reports, headers aren't always available per row in this flattening strategy)
             
             # 4. Date Parsing (Defaulting to Q1 2024 for the demo)
             date_str = i_low.get("date", i_low.get("timestamp", "2024-01-15"))
@@ -73,8 +71,17 @@ class QuickBooksParser(ParserStrategy):
                 date=dt,
                 description=i_low.get("description", i_low.get("memo", "Financial Entry")),
                 amount=amt,
-                category=i_low.get("category", "Uncategorized"),
+                category=i_low.get("category", i_low.get("account", "Uncategorized")),
                 type=r_type,
                 raw_data=json.dumps(i)
             ))
         return results
+
+class RootfiParser(QuickBooksParser):
+    pass
+
+class ParserFactory:
+    @staticmethod
+    def get_parser(source: str) -> ParserStrategy:
+        # For this challenge, we use the universal deep-search parser for everything
+        return QuickBooksParser()
