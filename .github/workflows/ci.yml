@@ -18,11 +18,10 @@ jobs:
         
       - name: Run Tests
         env:
-          # This tells GitHub to take the secrets you saved and put them in the app
+          # This injects the secrets you saved in GitHub Settings
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-          # We can set these directly here for testing
-          DATABASE_URL: "sqlite+aiosqlite:///./test.db"
+          # Use an in-memory test DB
+          DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           LOG_LEVEL: "INFO"
         run: pytest tests/
-        
