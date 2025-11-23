@@ -18,10 +18,12 @@ jobs:
         
       - name: Run Tests
         env:
-          # This injects the secrets you saved in GitHub Settings
+          # Inject Secrets
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
-          # Use an in-memory test DB
+          # We provide a dummy key for Groq to ensure config loads
+          # This also verifies the fallback logic works when keys are invalid!
+          GROQ_API_KEY: "gsk_dummy_test_key_for_ci"
           DATABASE_URL: "sqlite+aiosqlite:///:memory:"
           LOG_LEVEL: "INFO"
         run: pytest tests/
