@@ -64,7 +64,7 @@ class FinancialAgent:
                 print(" Switching to Fallback AI (Groq/Llama3)...")
                 try:
                     response = await self.groq_client.chat.completions.create(
-                        model="llama3.3-70b-versatile", 
+                        model="llama3.1-70b-versatile", 
                         messages=messages,
                         temperature=temperature
                     )
